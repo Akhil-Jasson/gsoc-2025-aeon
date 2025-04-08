@@ -100,24 +100,49 @@ class SETARTree:
     def _calculate_error(self, y, model=None):
         """
         Calculate the mean squared error of an autoregressive model.
-       
+
         Parameters:
         -----------
         y : array-like
-            Target values
+            Target values.
         model : AutoReg fitted model, optional
-            Pre-fitted AutoReg model. If None, a new model is fitted
-           
+            Pre-fitted AutoReg model. If None, a new model is fitted.
+
         Returns:
         --------
         error : float
-            Mean squared error (sum of squared residuals divided by sample size)
+            Mean squared error (sum of squared residuals divided by sample size).
         """
-        if model is None:
-            model = AutoReg(y, lags=self.lag).fit()
-        residuals = model.resid 
-        ssr = np.sum(residuals**2) 
-        return ssr / len(y)  # MSE
+        model = AutoReg(y, lags=self.lag).fit()
+        # if model is None:
+        #     model = AutoReg(y, lags=self.lag).fit()
+        residuals = model.resid  # Get residuals
+        ssr = np.sum(residuals**2)  # Calculate sum of squared residuals
+        abs_residuals = np.abs(residuals)  # Absolute residuals
+        n = len(y)  # Number of observations
+        p = self.lag + 1  # Number of parameters (lags + intercept)
+        # Mean Squared Error (MSE)
+        mse = ssr / (n - p) if n > p else float('inf')
+
+        # Mean Absolute Error (MAE)
+        mae = np.mean(abs_residuals)
+
+        # Root Mean Squared Error (RMSE)
+        rmse = np.sqrt(mse)
+
+        # Mean Absolute Scaled Error (MASE)
+        naive_forecast_errors = np.abs(np.diff(y))  # Naive forecast errors (lag-1)
+        naive_mae = np.mean(naive_forecast_errors) if len(naive_forecast_errors) > 0 else float('inf')
+        mase = mae / naive_mae if naive_mae > 0 else float('inf')
+
+        # Return all error metrics
+        return {
+            'MSE': mse,
+            'MAE': mae,
+            'RMSE': rmse,
+            'MASE': mase
+        }
+
 
 
 
@@ -125,54 +150,51 @@ class SETARTree:
     def _find_best_threshold(self, X, y):
         """
         Find the optimal threshold value for splitting the data.
-       
+
         Samples 10 potential threshold values evenly spaced across the range of the
         first lag feature, and chooses the one that minimizes prediction error
         while ensuring a minimum error reduction.
-       
+
         Parameters:
         -----------
         X : ndarray
-            Matrix of lagged features
+            Matrix of lagged features.
         y : array-like
-            Target values
-           
+            Target values.
+
         Returns:
         --------
         best_threshold : float or None
-            Optimal threshold value, or None if no valid split is found
+            Optimal threshold value, or None if no valid split is found.
         """
         best_threshold = None
         best_error = float('inf')
-        parent_error = self._calculate_error(y)
-
+        parent_error = self._calculate_error(y)['MSE'] # Use MSE as the primary metric
 
         for threshold in np.linspace(np.min(X[:, 0]), np.max(X[:, 0]), 10):
             left_mask = X[:, 0] < threshold
             right_mask = ~left_mask
 
-
             # Ensure minimum sample size in each split
-            if np.sum(left_mask) < self.lag*2 or np.sum(right_mask) < self.lag*2:
+            if np.sum(left_mask) < self.lag * 2 or np.sum(right_mask) < self.lag * 2:
                 continue
 
-
             # Calculate errors for each split
-            left_error = self._calculate_error(y[left_mask])
-            right_error = self._calculate_error(y[right_mask])
-           
+            left_error = self._calculate_error(y[left_mask])['MSE']  # Use MSE for left split
+            right_error = self._calculate_error(y[right_mask])['MSE']  # Use MSE for right split
+
             # Calculate weighted average error
             combined_error = (left_error * len(y[left_mask]) +
-                             right_error * len(y[right_mask])) / len(y)
-
+                              right_error * len(y[right_mask])) / len(y)
 
             # Check if split provides sufficient error reduction
             error_reduction = parent_error - combined_error
+            print(error_reduction, parent_error, combined_error)
+            
             if error_reduction > self.error_threshold and combined_error < best_error:
                 best_error = combined_error
                 best_threshold = threshold
-
-
+        print(f"Threshold: {threshold}, Combined Error: {combined_error}, Error Reduction: {error_reduction}")
         return best_threshold
 
 
